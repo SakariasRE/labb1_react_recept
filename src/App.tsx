@@ -7,6 +7,9 @@ import RecipeDetailsPage from './pages/details'
 import type { Recipe } from './types/Recipe'
 import './index.css'
 
+const API_BASE_URL = 'https://dummyjson.com/recipes'
+const STORAGE_KEY = 'savedRecipes'
+
 function App() {
     const [recipes, setRecipes] = useState<Recipe[]>([])
     const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null)
@@ -15,15 +18,30 @@ function App() {
 
     const navigate = useNavigate()
 
+    function saveRecipesToStorage(items: Recipe[]) {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(items))
+        } catch (error) {
+            console.error('Could not save recipes to local storage', error)
+        }
+    }
+
     async function fetchRecipes() {
         setLoading(true)
         setError(null)
         try {
-            const response = await fetch('https://dummyjson.com/recipes')
+            const storedRecipes = localStorage.getItem(STORAGE_KEY)
+            if (storedRecipes) {
+                setRecipes(JSON.parse(storedRecipes))
+                return
+            }
+
+            const response = await fetch(API_BASE_URL)
             if (!response.ok) throw new Error('Failed to fetch recipes')
 
             const data = await response.json()
             setRecipes(data.recipes)
+            saveRecipesToStorage(data.recipes)
         } catch (error) {
             const message =
                 error instanceof Error
@@ -42,78 +60,101 @@ function App() {
 
     async function handleRecipeSubmit(recipe: Recipe) {
         setError(null)
-        try {
-            if (editingRecipe) {
-                const response = await fetch(
-                    `https://dummyjson.com/recipes/${recipe.id}`,
-                    {
-                        method: 'PATCH',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(recipe)
-                    }
-                )
+
+        if (editingRecipe) {
+            const updatedRecipes = recipes.map((currentRecipe) =>
+                currentRecipe.id === recipe.id ? recipe : currentRecipe
+            )
+            setRecipes(updatedRecipes)
+            saveRecipesToStorage(updatedRecipes)
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/${recipe.id}`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(recipe)
+                })
                 if (!response.ok) throw new Error('Failed to update recipe')
 
-                const updatedRecipes = recipes.map((currentRecipe) =>
-                    currentRecipe.id === recipe.id ? recipe : currentRecipe
+                const responseRecipe = await response.json()
+                const mergedRecipes = recipes.map((currentRecipe) =>
+                    currentRecipe.id === recipe.id
+                        ? { ...currentRecipe, ...responseRecipe }
+                        : currentRecipe
                 )
 
-                setRecipes(updatedRecipes)
+                setRecipes(mergedRecipes)
+                saveRecipesToStorage(mergedRecipes)
+            } catch (error) {
+                const message =
+                    error instanceof Error
+                        ? error.message
+                        : 'Failed to update recipe'
+                setError(message)
+                console.error(error)
+            } finally {
                 setEditingRecipe(null)
                 navigate('/')
-            } else {
-                const response = await fetch(
-                    'https://dummyjson.com/recipes/add',
-                    {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(recipe)
-                    }
-                )
+            }
+        } else {
+            const newRecipe: Recipe = {
+                ...recipe,
+                id: Date.now()
+            }
+            const addedRecipes = [newRecipe, ...recipes]
+            setRecipes(addedRecipes)
+            saveRecipesToStorage(addedRecipes)
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/add`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(recipe)
+                })
                 if (!response.ok) throw new Error('Failed to add recipe')
 
                 const createdRecipe = await response.json()
-
-                const newRecipe: Recipe = {
+                const createdRecipeWithId: Recipe = {
                     ...createdRecipe,
-                    id: Date.now(),
+                    id: newRecipe.id,
                     name: recipe.name,
                     ingredients: recipe.ingredients,
                     difficulty: recipe.difficulty,
                     image: recipe.image
                 }
-
-                setRecipes([newRecipe, ...recipes])
+                const updatedRecipes = [createdRecipeWithId, ...recipes]
+                setRecipes(updatedRecipes)
+                saveRecipesToStorage(updatedRecipes)
+            } catch (error) {
+                const message =
+                    error instanceof Error
+                        ? error.message
+                        : 'Failed to add recipe'
+                setError(message)
+                console.error(error)
+            } finally {
                 navigate('/')
             }
-        } catch (error) {
-            const message =
-                error instanceof Error ? error.message : 'Failed to save recipe'
-            setError(message)
-            console.error(error)
         }
     }
 
     async function handleRecipeDelete(recipeId: number) {
         setError(null)
+        const filteredRecipes = recipes.filter(
+            (recipe) => recipe.id !== recipeId
+        )
+        setRecipes(filteredRecipes)
+        saveRecipesToStorage(filteredRecipes)
+
         try {
-            const response = await fetch(
-                `https://dummyjson.com/recipes/${recipeId}`,
-                {
-                    method: 'DELETE'
-                }
-            )
+            const response = await fetch(`${API_BASE_URL}/${recipeId}`, {
+                method: 'DELETE'
+            })
             if (!response.ok) throw new Error('Failed to delete recipe')
-
-            const filteredRecipes = recipes.filter(
-                (recipe) => recipe.id !== recipeId
-            )
-
-            setRecipes(filteredRecipes)
         } catch (error) {
             const message =
                 error instanceof Error
